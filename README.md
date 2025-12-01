@@ -24,5 +24,6 @@ Distances are computed using the Haversine formula (great-circle distance).
 
 From the project folder:
 
-```bash
-g++ -std=c++17 -O2 -Wall -Wextra -pedantic main.cpp StadiumLocator.cpp -o stadium_locator
+make
+make run
+make clean
