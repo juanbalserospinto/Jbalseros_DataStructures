@@ -1,249 +1,174 @@
 #include "StadiumLocator.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <sstream>
-#include <utility>
 
-std::size_t StadiumLocator::Count() const {
-  return stadiums_.size();
+using namespace std;
+
+StadiumLocator::StadiumLocator(const string& csv_path) : csv_path_(csv_path) {}
+
+size_t StadiumLocator::Size() const {
+  return records_.size();
 }
 
-std::string StadiumLocator::Trim(const std::string& s) {
-  std::size_t i = 0;
-  while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i])) != 0) {
-    ++i;
+string StadiumLocator::Trim(const string& s) {
+  size_t i = 0;
+  while (i < s.size() && isspace(static_cast<unsigned char>(s[i]))) {
+    i++;
   }
-  std::size_t j = s.size();
-  while (j > i && std::isspace(static_cast<unsigned char>(s[j - 1])) != 0) {
-    --j;
+  size_t j = s.size();
+  while (j > i && isspace(static_cast<unsigned char>(s[j - 1]))) {
+    j--;
   }
   return s.substr(i, j - i);
 }
 
-std::vector<std::string> StadiumLocator::SplitCSVLine(const std::string& line) {
-  // Supports quoted fields and commas inside quotes.
-  std::vector<std::string> out;
-  std::string cur;
+bool StadiumLocator::ToLongLong(const string& s, long long* out) {
+  if (!out) return false;
+  try {
+    size_t idx = 0;
+    string t = Trim(s);
+    long long v = stoll(t, &idx);
+    if (idx != t.size()) return false;
+    *out = v;
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+bool StadiumLocator::ToDouble(const string& s, double* out) {
+  if (!out) return false;
+  try {
+    size_t idx = 0;
+    string t = Trim(s);
+    double v = stod(t, &idx);
+    if (idx != t.size()) return false;
+    *out = v;
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+bool StadiumLocator::ParseLineCSV(const string& line, vector<string>* fields) {
+  if (!fields) return false;
+  fields->clear();
+
+  string cur;
   bool in_quotes = false;
 
-  for (std::size_t i = 0; i < line.size(); ++i) {
+  for (size_t i = 0; i < line.size(); i++) {
     char c = line[i];
     if (c == '"') {
-      // If we see "" while in quotes, that's an escaped quote.
-      if (in_quotes && (i + 1) < line.size() && line[i + 1] == '"') {
+      if (in_quotes && i + 1 < line.size() && line[i + 1] == '"') {
         cur.push_back('"');
-        ++i;
+        i++;
       } else {
         in_quotes = !in_quotes;
       }
     } else if (c == ',' && !in_quotes) {
-      out.push_back(Trim(cur));
+      fields->push_back(cur);
       cur.clear();
     } else {
       cur.push_back(c);
     }
   }
-
-  out.push_back(Trim(cur));
-
-  // Strip surrounding quotes if present.
-  for (std::size_t k = 0; k < out.size(); ++k) {
-    std::string f = out[k];
-    if (f.size() >= 2 && f.front() == '"' && f.back() == '"') {
-      out[k] = f.substr(1, f.size() - 2);
-    }
-  }
-
-  return out;
-}
-
-bool StadiumLocator::ToLongLong(const std::string& s, long long& out) {
-  std::string t = Trim(s);
-  if (t.empty()) return false;
-
-  // Remove common formatting like commas in capacity.
-  std::string cleaned;
-  cleaned.reserve(t.size());
-  for (std::size_t i = 0; i < t.size(); ++i) {
-    if (t[i] != ',') cleaned.push_back(t[i]);
-  }
-
-  std::istringstream iss(cleaned);
-  long long v = 0;
-  iss >> v;
-  if (!iss || (iss.peek() != EOF && !iss.eof())) return false;
-  out = v;
+  fields->push_back(cur);
   return true;
 }
 
-bool StadiumLocator::ToDouble(const std::string& s, double& out) {
-  std::string t = Trim(s);
-  if (t.empty()) return false;
+bool StadiumLocator::Load() {
+  records_.clear();
 
-  std::istringstream iss(t);
-  double v = 0.0;
-  iss >> v;
-  if (!iss || (iss.peek() != EOF && !iss.eof())) return false;
-  out = v;
-  return true;
-}
-
-double StadiumLocator::HaversineKm(double lat1, double lon1, double lat2, double lon2) {
-  constexpr double kPi = 3.14159265358979323846;
-  constexpr double kEarthRadiusKm = 6371.0;
-
-  auto deg2rad = [](double deg) -> double {
-    constexpr double kPiLocal = 3.14159265358979323846;
-    return deg * (kPiLocal / 180.0);
-  };
-
-  double dlat = deg2rad(lat2 - lat1);
-  double dlon = deg2rad(lon2 - lon1);
-
-  double a = std::sin(dlat / 2.0) * std::sin(dlat / 2.0) +
-             std::cos(deg2rad(lat1)) * std::cos(deg2rad(lat2)) *
-             std::sin(dlon / 2.0) * std::sin(dlon / 2.0);
-
-  double c = 2.0 * std::atan2(std::sqrt(a), std::sqrt(1.0 - a));
-  (void)kPi; // keep compilers happy if they warn about unused constants in some builds
-
-  return kEarthRadiusKm * c;
-}
-
-bool StadiumLocator::LoadFromCSV(const std::string& csv_path) {
-  stadiums_.clear();
-
-  std::ifstream fin(csv_path);
+  ifstream fin(csv_path_);
   if (!fin.is_open()) {
-    std::cerr << "Error: Could not open CSV file: " << csv_path << "\n";
+    cout << "could not open file: " << csv_path_ << "\n";
     return false;
   }
 
-  std::string line;
-  bool header_checked = false;
-  std::size_t line_no = 0;
-  std::size_t skipped = 0;
+  string line;
+  bool header_skipped = false;
 
-  while (std::getline(fin, line)) {
-    ++line_no;
-    if (Trim(line).empty()) continue;
-
-    std::vector<std::string> cols = SplitCSVLine(line);
-
-    // Expect 7 columns: Team,City,Stadium,Capacity,Latitude,Longitude,Country
-    if (cols.size() < 7) {
-      // If this is likely a header or malformed line, skip it.
-      ++skipped;
+  while (getline(fin, line)) {
+    if (!header_skipped) {
+      header_skipped = true;  
       continue;
     }
+    if (line.empty()) continue;
 
-    // If first non-empty line looks like header, skip it once.
-    if (!header_checked) {
-      header_checked = true;
-      std::string c0 = cols[0];
-      std::string c1 = cols[1];
-      std::string c2 = cols[2];
-      std::string c3 = cols[3];
-      std::string c4 = cols[4];
-      std::string c5 = cols[5];
-      std::string c6 = cols[6];
-      auto lower = [](std::string s) -> std::string {
-        for (std::size_t i = 0; i < s.size(); ++i) {
-          s[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
-        }
-        return s;
-      };
-      if (lower(c0) == "team" && lower(c1) == "city" && lower(c2) == "stadium" &&
-          lower(c3) == "capacity" && lower(c4) == "latitude" && lower(c5) == "longitude" &&
-          lower(c6) == "country") {
-        continue;
-      }
-    }
+    vector<string> f;
+    if (!ParseLineCSV(line, &f)) continue;
+    if (f.size() < 7) continue;
 
-    Stadium s;
-    s.team = cols[0];
-    s.city = cols[1];
-    s.stadium = cols[2];
+    StadiumRecord r;
+    r.team = Trim(f[0]);
+    r.city = Trim(f[1]);
+    r.stadium = Trim(f[2]);
 
     long long cap = 0;
     double lat = 0.0;
     double lon = 0.0;
 
-    if (!ToLongLong(cols[3], cap) || !ToDouble(cols[4], lat) || !ToDouble(cols[5], lon)) {
-      ++skipped;
-      continue;
-    }
+    if (!ToLongLong(f[3], &cap)) continue;
+    if (!ToDouble(f[4], &lat)) continue;
+    if (!ToDouble(f[5], &lon)) continue;
 
-    s.capacity = cap;
-    s.latitude = lat;
-    s.longitude = lon;
-    s.country = cols[6];
+    r.capacity = cap;
+    r.latitude = lat;
+    r.longitude = lon;
+    r.country = Trim(f[6]);
 
-    stadiums_.push_back(s);
+    records_.push_back(r);
   }
 
-  if (stadiums_.empty()) {
-    std::cerr << "Error: No valid stadium rows were loaded from: " << csv_path << "\n";
-    return false;
+  if (records_.empty()) {
+    cout << "Warning: no valid stadium rows loaded from " << csv_path_ << "\n";
   }
-
-  if (skipped > 0) {
-    std::cerr << "Note: Skipped " << skipped << " malformed row(s).\n";
-  }
-
   return true;
 }
 
-bool StadiumLocator::FindNearest(double user_lat, double user_lon, StadiumDistance& out) const {
-  if (stadiums_.empty()) return false;
-
-  double best = std::numeric_limits<double>::infinity();
-  std::size_t best_i = 0;
-
-  for (std::size_t i = 0; i < stadiums_.size(); ++i) {
-    double d = HaversineKm(user_lat, user_lon, stadiums_[i].latitude, stadiums_[i].longitude);
-    if (d < best) {
-      best = d;
-      best_i = i;
-    }
-  }
-
-  out.stadium = stadiums_[best_i];
-  out.distance_km = best;
-  return true;
+double StadiumLocator::DegToRad(double deg) {
+  return deg * (3.14159265358979323846 / 180.0);
 }
 
-std::vector<StadiumDistance> StadiumLocator::FindKNearest(double user_lat, double user_lon, std::size_t k) const {
-  std::vector<StadiumDistance> result;
-  if (stadiums_.empty() || k == 0) return result;
+double StadiumLocator::HaversineKm(double lat1, double lon1, double lat2, double lon2) {
+  const double R = 6371.0;  
+  const double dlat = DegToRad(lat2 - lat1);
+  const double dlon = DegToRad(lon2 - lon1);
 
-  std::vector<std::pair<double, std::size_t> > dist_idx;
-  dist_idx.reserve(stadiums_.size());
+  const double a =
+      sin(dlat / 2.0) * sin(dlat / 2.0) +
+      cos(DegToRad(lat1)) * cos(DegToRad(lat2)) *
+      sin(dlon / 2.0) * sin(dlon / 2.0);
 
-  for (std::size_t i = 0; i < stadiums_.size(); ++i) {
-    double d = HaversineKm(user_lat, user_lon, stadiums_[i].latitude, stadiums_[i].longitude);
-    dist_idx.push_back(std::make_pair(d, i));
+  const double c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
+  return R * c;
+}
+
+vector<StadiumResult> StadiumLocator::FindKNearest(double user_lat, double user_lon, size_t k) const {
+  vector<StadiumResult> out;
+  out.reserve(records_.size());
+
+  for (size_t i = 0; i < records_.size(); i++) {
+    const StadiumRecord& r = records_[i];
+    StadiumResult res;
+    res.record = r;
+    res.distance_km = HaversineKm(user_lat, user_lon, r.latitude, r.longitude);
+    out.push_back(res);
   }
 
-  std::sort(dist_idx.begin(), dist_idx.end(),
-            [](const std::pair<double, std::size_t>& a, const std::pair<double, std::size_t>& b) {
-              return a.first < b.first;
-            });
+  sort(out.begin(), out.end(),
+       [](const StadiumResult& a, const StadiumResult& b) {
+         return a.distance_km < b.distance_km;
+       });
 
-  if (k > dist_idx.size()) k = dist_idx.size();
-  result.reserve(k);
-
-  for (std::size_t j = 0; j < k; ++j) {
-    StadiumDistance sd;
-    sd.stadium = stadiums_[dist_idx[j].second];
-    sd.distance_km = dist_idx[j].first;
-    result.push_back(sd);
-  }
-
-  return result;
+  if (k > out.size()) k = out.size();
+  out.resize(k);
+  return out;
 }
