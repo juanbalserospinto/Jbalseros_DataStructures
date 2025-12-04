@@ -1,7 +1,7 @@
 # Jbalseros_DataStructures
 Final Project for Data Structures Class
 
-# Soccer/Football Stadium Locator (Distance Finder)
+#  Stadium Locator (Distance Finder)
 
 This program loads a CSV of soccer stadiums that includes stadiums from all over europe where most of the famoust stadiums are located.
 Once you run the program, it will give you the latitude and longituted of the most famous europeans cities in case you do not know your coordinates. After this the program does the followin: 
