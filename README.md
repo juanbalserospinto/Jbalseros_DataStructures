@@ -33,5 +33,6 @@ Distances are computed using the Haversine formula, which calculates the great-c
 You can run the program and test it by yourself, you need all the files in the same folder, then using terminal run the following command and follow the instructions given by the program
 
 make
+
 make run
 
